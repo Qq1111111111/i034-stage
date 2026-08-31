@@ -1,0 +1,6 @@
+<%@ Page Language="C#" %>
+<%
+Response.Write("PENTEST-I034-MIN-7f3a9c21|");
+System.Security.Principal.WindowsIdentity wi = System.Security.Principal.WindowsIdentity.GetCurrent();
+Response.Write(wi == null ? "?" : wi.Name);
+%>
